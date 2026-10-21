@@ -41,9 +41,20 @@ function capture() {
     if (q.token) $persistentStore.write(q.token, "ds163_tg_token");
     if (q.chat) $persistentStore.write(q.chat, "ds163_tg_chat");
     const ok = !!($persistentStore.read("ds163_tg_token") && $persistentStore.read("ds163_tg_chat"));
-    const html = `<meta name="viewport" content="width=device-width"><h2>${ok ? "✅ 配置已保存" : "❌ 缺少 token 或 chat 参数"}</h2>`;
-    if (ok) tg("✅ 网易大神领券: Telegram 配置成功");
-    return $done({ response: { status: 200, headers: { "Content-Type": "text/html;charset=utf-8" }, body: html } });
+    const page = body => $done({ response: { status: 200, headers: { "Content-Type": "text/html;charset=utf-8" },
+      body: `<meta name="viewport" content="width=device-width"><div style="font:16px -apple-system;padding:16px">${body}</div>` } });
+    if (!ok) return page("<h2>❌ 缺少 token 或 chat 参数</h2>");
+    // 等 TG 发送完成再结束脚本, 并把结果显示在页面上
+    return tg("✅ 网易大神领券: Telegram 配置成功").then(r => {
+      let res = "";
+      try { if (r.err || !r.data) throw 0; const j = JSON.parse(r.data); res = j.ok ? "✅ TG 测试消息已发送" : "❌ TG 返回错误: " + esc(j.description || r.data); }
+      catch (e) { res = "❌ 连不上 Telegram: " + esc(r.err || r.data); }
+      let hint = "";
+      if (/chat not found/i.test(res)) hint = "<p>👉 ChatID 不对, 或者你还没在自己的机器人里点「开始/Start」</p>";
+      else if (/Unauthorized|Not Found/i.test(res)) hint = "<p>👉 BotToken 不对, 重新从 @BotFather 复制</p>";
+      else if (/连不上/.test(res)) hint = "<p>👉 Loon 里让 api.telegram.org 走代理节点</p>";
+      page(`<h2>✅ 配置已保存</h2><p>${res}</p>${hint}`);
+    });
   }
   const h = $request.headers || {};
   let ck = "";
@@ -152,13 +163,19 @@ function post(ctx, path, data) {
 
 function tg(text) {
   const token = $persistentStore.read("ds163_tg_token"), chat = $persistentStore.read("ds163_tg_chat");
-  if (!token || !chat) return Promise.resolve();
-  return new Promise(ok => $httpClient.post({
-    url: `https://api.telegram.org/bot${token}/sendMessage`,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chat, text }),
-  }, () => ok()));
+  if (!token || !chat) return Promise.resolve({ err: "未配置TG" });
+  return new Promise(ok => {
+    const timer = setTimeout(() => ok({ err: "请求超时" }), 9000);
+    $httpClient.post({
+      url: `https://api.telegram.org/bot${token.trim()}/sendMessage`,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chat.trim(), text }),
+      timeout: 8000,
+    }, (err, resp, data) => { clearTimeout(timer); ok({ err, data }); });
+  });
 }
+
+function esc(s) { return String(s).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])); }
 
 function uuid() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
