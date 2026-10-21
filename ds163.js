@@ -122,7 +122,7 @@ async function run() {
   const grant = t => post(ctx, "/v1/web/exp-vip/external/super-coupon/grant",
     { brandId: t.brandId, superCouponId: t.couponId, phoneBizType: "VIP" }).catch(e => ({ code: -1, errmsg: String(e) }));
   const last = {}, tries = {};
-  const isFinal = r => r.code === 200 || /已领|领过|已经|上限|次数/.test(r.errmsg || "");
+  const isFinal = r => r.code === 200 || /已领取|已领过|领取过|已经领/.test(r.errmsg || ""); // 只有抢到或明确已领才停, 其他提示都继续重试
 
   const when = {};
   if (grabMode && pending.length) {
