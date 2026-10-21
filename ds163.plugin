@@ -1,0 +1,10 @@
+#!name=网易大神每日领券
+#!desc=打开小程序自动抓Cookie, 每天0点启动, 00:01:00准点抢券并推送Telegram
+#!author=you
+
+[Script]
+http-request ^https:\/\/inf\.ds\.163\.com\/v1\/web\/ script-path=https://raw.githubusercontent.com/fox37x/loon-scripts/main/ds163.js, requires-body=false, timeout=10, tag=网易大神抓Cookie
+cron "0 0 * * *" script-path=https://raw.githubusercontent.com/fox37x/loon-scripts/main/ds163.js, timeout=180, tag=网易大神领券
+
+[MITM]
+hostname = inf.ds.163.com
