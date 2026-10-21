@@ -16,8 +16,8 @@ const TARGETS = [
   { brandId: "6a5f1884bde244285e958847", couponId: "6a5f1a1d4d7fef55f1590b26", name: "霸王茶姬 外卖券 满28减10" },
   // { brandId: "69a7ce1d2ff28f708825a912", couponId: "6ab37deca8b2237f8a4d6d57", name: "滴滴 出行券包" },
 ];
-const GRAB_AT = "00:01:00";   // 开抢时间(北京时间)。抓包显示霸王茶姬每天 00:01:00 开放
-const GRAB_SECONDS = 10;      // 开抢后持续重试多少秒
+const GRAB_AT = ["00:00:00", "00:01:00"]; // 开抢时间(北京时间), 整点抢一轮, 00:01 再补一轮
+const GRAB_SECONDS = 10;      // 每轮开抢后持续重试多少秒
 const INTERVAL_MS = 300;      // 每轮请求间隔(毫秒), 别太小以免风控
 // 说明: 脚本用服务器时间对时, 在 GRAB_AT 前启动会自动等到点再抢;
 //       白天手动运行则直接每张券领一次。
@@ -96,10 +96,17 @@ async function run() {
 
   // 计算北京时间的开抢时刻
   const DAY = 86400000, BJ = 8 * 3600000;
-  const [hh, mm, ss] = GRAB_AT.split(":").map(Number);
-  let target = Math.floor((now() + BJ) / DAY) * DAY - BJ + ((hh * 60 + mm) * 60 + ss) * 1000;
-  if (target + GRAB_SECONDS * 1000 < now() && target + DAY - now() < 10 * 60000) target += DAY; // 23:5x 启动 → 等明天
-  const grabMode = target + GRAB_SECONDS * 1000 >= now() && target - now() < 10 * 60000;
+  const dayStart = Math.floor((now() + BJ) / DAY) * DAY - BJ;
+  const windows = [];
+  for (const t of GRAB_AT) {
+    const [hh, mm, ss] = t.split(":").map(Number);
+    let ts = dayStart + ((hh * 60 + mm) * 60 + ss) * 1000;
+    if (ts + GRAB_SECONDS * 1000 < now() && ts + DAY - now() < 10 * 60000) ts += DAY; // 23:59 启动 → 等明天
+    // 只处理接下来 10 分钟内的开抢时间
+    if (ts + GRAB_SECONDS * 1000 >= now() && ts - now() < 10 * 60000) windows.push({ t, ts });
+  }
+  windows.sort((a, b) => a.ts - b.ts);
+  const grabMode = windows.length > 0;
 
   // 跳过已领过的
   let pending = TARGETS.slice();
@@ -115,17 +122,22 @@ async function run() {
   const last = {}, tries = {};
   const isFinal = r => r.code === 200 || /已领|领过|已经|上限|次数/.test(r.errmsg || "");
 
+  const when = {};
   if (grabMode && pending.length) {
-    const wait = target - now() - 80; // 提前约 80ms 发出, 抵消网络延迟
-    if (wait > 0) await sleep(wait);
-    const end = target + GRAB_SECONDS * 1000;
-    while (pending.length && now() < end) {
-      const rs = await Promise.all(pending.map(grant));
-      pending = pending.filter((t, i) => {
-        last[t.couponId] = rs[i]; tries[t.couponId] = (tries[t.couponId] || 0) + 1;
-        return !isFinal(rs[i]);
-      });
-      if (pending.length) await sleep(INTERVAL_MS);
+    for (const w of windows) {
+      if (!pending.length) break;
+      const wait = w.ts - now() - 80; // 提前约 80ms 发出, 抵消网络延迟
+      if (wait > 0) await sleep(wait);
+      const end = w.ts + GRAB_SECONDS * 1000;
+      while (pending.length && now() < end) {
+        const rs = await Promise.all(pending.map(grant));
+        pending = pending.filter((t, i) => {
+          last[t.couponId] = rs[i]; tries[t.couponId] = (tries[t.couponId] || 0) + 1;
+          if (rs[i].code === 200) when[t.couponId] = w.t;
+          return !isFinal(rs[i]);
+        });
+        if (pending.length) await sleep(INTERVAL_MS);
+      }
     }
   } else {
     for (const t of pending) { last[t.couponId] = await grant(t); tries[t.couponId] = 1; await sleep(1000); }
@@ -133,9 +145,9 @@ async function run() {
 
   for (const t of TARGETS) {
     const r = last[t.couponId];
-    if (r) lines.push(`${t.name}: ${r.code === 200 ? "✅ 抢到了" : "❌ " + r.errmsg} (${tries[t.couponId]}次)`);
+    if (r) lines.push(`${t.name}: ${r.code === 200 ? "✅ 抢到了" + (when[t.couponId] ? ` (${when[t.couponId]}轮)` : "") : "❌ " + r.errmsg} (${tries[t.couponId]}次)`);
   }
-  if (grabMode) lines.push(`开抢时间 ${GRAB_AT}, 对时偏差 ${Math.round(offset)}ms`);
+  if (grabMode) lines.push(`开抢时间 ${windows.map(w => w.t).join(" / ")}, 对时偏差 ${Math.round(offset)}ms`);
   return finish(lines);
 }
 
