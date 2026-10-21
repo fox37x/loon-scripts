@@ -12,15 +12,15 @@
 // 要抢的券 (brandId + couponId 固定不变)。不想要的在行首加 // 注释掉
 const TARGETS = [
   { brandId: "6a5f1884bde244285e958847", couponId: "6a5f1a02f34ee33e0d7d9978", name: "霸王茶姬 5折外卖券 立减20" },
-  { brandId: "6a5f1884bde244285e958847", couponId: "6a5f1a3df34ee33e0d7d9979", name: "霸王茶姬 5折外卖券 立减25" },
-  { brandId: "6a5f1884bde244285e958847", couponId: "6a5f1a1d4d7fef55f1590b26", name: "霸王茶姬 外卖券 满28减10" },
+  // { brandId: "6a5f1884bde244285e958847", couponId: "6a5f1a3df34ee33e0d7d9979", name: "霸王茶姬 5折外卖券 立减25" },
+  // { brandId: "6a5f1884bde244285e958847", couponId: "6a5f1a1d4d7fef55f1590b26", name: "霸王茶姬 外卖券 满28减10" },
   // { brandId: "69a7ce1d2ff28f708825a912", couponId: "6ab37deca8b2237f8a4d6d57", name: "滴滴 出行券包" },
 ];
 // 插件里可用 argument=test@20:10:00 做演练: 按该时间准点抢一轮(3秒)
 const TEST_AT = (typeof $argument === "string" && /^test@(\d\d:\d\d:\d\d)$/.test($argument)) ? $argument.slice(5) : "";
 const GRAB_AT = TEST_AT ? [TEST_AT] : ["00:00:00", "00:01:00"]; // 开抢时间(北京时间), 整点抢一轮, 00:01 再补一轮
-const GRAB_SECONDS = TEST_AT ? 3 : 10; // 每轮开抢后持续重试多少秒
-const INTERVAL_MS = 300;      // 每轮请求间隔(毫秒), 别太小以免风控
+const GRAB_SECONDS = TEST_AT ? 3 : 8;  // 每轮开抢后持续重试多少秒
+const INTERVAL_MS = 500;      // 每次请求间隔(毫秒), 别太小以免风控
 // 说明: 脚本用服务器时间对时, 在 GRAB_AT 前启动会自动等到点再抢;
 //       白天手动运行则直接每张券领一次。
 // ==============================
