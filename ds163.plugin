@@ -1,11 +1,10 @@
 #!name=网易大神每日领券
-#!desc=打开小程序自动抓Cookie, 每天23:59启动, 00:00和00:01两轮准点抢券并推送Telegram (含20:10测试任务, 测完可删)
+#!desc=打开小程序自动抓Cookie, 每天23:59启动, 00:00和00:01两轮准点抢券并推送Telegram
 #!author=you
 
 [Script]
 http-request ^https:\/\/inf\.ds\.163\.com\/v1\/web\/ script-path=https://raw.githubusercontent.com/fox37x/loon-scripts/main/ds163.js, requires-body=false, timeout=40, tag=网易大神抓Cookie
 cron "59 23 * * *" script-path=https://raw.githubusercontent.com/fox37x/loon-scripts/main/ds163.js, timeout=240, tag=网易大神领券
-cron "8 20 * * *" script-path=https://raw.githubusercontent.com/fox37x/loon-scripts/main/ds163.js, timeout=240, argument=test@20:10:00, tag=网易大神领券-20点10测试
 
 [MITM]
 hostname = inf.ds.163.com
