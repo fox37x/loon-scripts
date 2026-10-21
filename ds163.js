@@ -20,7 +20,7 @@ const TARGETS = [
 const TEST_AT = (typeof $argument === "string" && /^test@(\d\d:\d\d:\d\d)$/.test($argument)) ? $argument.slice(5) : "";
 const GRAB_AT = TEST_AT ? [TEST_AT] : ["00:00:00", "00:01:00"]; // 开抢时间(北京时间), 整点抢一轮, 00:01 再补一轮
 const GRAB_SECONDS = TEST_AT ? 3 : 8;  // 每轮开抢后持续重试多少秒
-const INTERVAL_MS = 500;      // 每次请求间隔(毫秒), 别太小以免风控
+const INTERVAL_MS = 1000;     // 每次请求间隔(毫秒), 别太小以免风控
 // 说明: 脚本用服务器时间对时, 在 GRAB_AT 前启动会自动等到点再抢;
 //       白天手动运行则直接每张券领一次。
 // ==============================
