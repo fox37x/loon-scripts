@@ -15,3 +15,7 @@ https://raw.githubusercontent.com/fox37x/loon-scripts/main/ds163.plugin
 4. 每天 0 点启动，北京时间 00:01:00 准点抢券，结果推送到 Telegram
 
 仓库不含任何 Cookie / Token，它们只保存在手机 Loon 本地。
+
+**手动运行一次（测试用）**：开着 Loon，用 Safari 打开
+`https://inf.ds.163.com/v1/web/ds163-run`
+结果会显示在页面上并推送到 TG。白天运行每张券只领一次，0 点前运行会等到开抢时间。

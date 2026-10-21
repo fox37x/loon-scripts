@@ -33,6 +33,12 @@ else run().catch(e => finish(["出错: " + e])).then(() => $done());
 
 // ---------- 抓 Cookie / 保存TG配置 ----------
 function capture() {
+  // 手动运行: 开着 Loon 用 Safari 打开 https://inf.ds.163.com/v1/web/ds163-run
+  if (($request.url || "").indexOf("/v1/web/ds163-run") >= 0) {
+    return run().catch(e => finish(["出错: " + e])).then(lines =>
+      $done({ response: { status: 200, headers: { "Content-Type": "text/html;charset=utf-8" },
+        body: `<meta name="viewport" content="width=device-width"><div style="font:16px -apple-system;padding:16px"><h2>🎟 运行结果</h2><p>${(lines || []).map(esc).join("<br>")}</p></div>` } }));
+  }
   if (($request.url || "").indexOf("/v1/web/ds163-config") >= 0) {
     const q = {};
     ($request.url.split("?")[1] || "").split("&").forEach(p => {
@@ -139,7 +145,7 @@ function finish(lines) {
   const msg = lines.join("\n");
   console.log(msg);
   $notification.post("网易大神领券", "", msg);
-  return tg("🎟 网易大神领券\n" + msg);
+  return tg("🎟 网易大神领券\n" + msg).then(() => lines);
 }
 
 function post(ctx, path, data) {
