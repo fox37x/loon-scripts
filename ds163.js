@@ -110,9 +110,10 @@ async function run() {
   windows.sort((a, b) => a.ts - b.ts);
   const grabMode = windows.length > 0;
 
-  // 跳过已领过的
+  // 白天手动运行时跳过已领过的。
+  // 抢券模式(23:59启动)不能查: 那时还是前一天, 会把前一天的「已领过」当成今天的而跳过开抢
   let pending = TARGETS.slice();
-  try {
+  if (!grabMode) try {
     const st = await post(ctx, "/v1/web/exp-vip/external/super-coupon/grant-status", { superCouponIds: TARGETS.map(t => t.couponId) });
     const done = {};
     st.result.grantItems.forEach(g => { if (g.status !== "NOT_GRANTED") done[g.superCouponId] = 1; });
