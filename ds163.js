@@ -1,7 +1,7 @@
 /*
  * 网易大神「合作权益」每日领券 - Loon 脚本 (一个文件两种用途)
  *  1) http-request 模式: 打开小程序时自动抓取 NTES_YD_SESS 并保存, 变化时推送 TG
- *  2) cron 模式: 每天 0 点启动, 对时后等到开抢时间准点抢券, 结果推送到 Telegram
+ *  2) cron 模式: 每天 23:59 启动, 对时后 00:00 / 00:01 两轮准点抢券, 结果推送到 Telegram
  *
  * TG 配置不写在脚本里(脚本放公开仓库), 开着 Loon 用 Safari 打开一次:
  *   https://inf.ds.163.com/v1/web/ds163-config?token=你的BotToken&chat=你的ChatID
@@ -22,7 +22,7 @@ const GRAB_AT = TEST_AT ? [TEST_AT] : ["00:00:00", "00:01:00"]; // 开抢时间(
 const GRAB_SECONDS = TEST_AT ? 3 : 8;  // 每轮开抢后持续重试多少秒
 const INTERVAL_MS = 1000;     // 每次请求间隔(毫秒), 别太小以免风控
 // 说明: 脚本用服务器时间对时, 在 GRAB_AT 前启动会自动等到点再抢;
-//       白天手动运行则直接每张券领一次。
+//       白天手动运行则每张券只领一次(已领过的跳过)。
 // ==============================
 
 const KEY = "ds163_yd_sess";
@@ -84,7 +84,7 @@ async function run() {
   const xsrf = uuid();
   const ctx = { cookie: `NTES_YD_SESS=${sess}; GL-XSRF-TOKEN=${xsrf}; LINK_LOGIN_CHANNEL=MINI_TO_H5; LINK_LOGIN_PRODUCT=godlike_wyds_xcx`, xsrf, dev, uid: "" };
 
-  const lg = await post(ctx, "/v1/web/base/login", {});
+  const lg = await retry(() => post(ctx, "/v1/web/base/login", {}));
   if (lg.code !== 200)
     return finish([`❌ Cookie 已失效 (${lg.errmsg || lg.code})`, "👉 开着 Loon 打开一次「网易大神」小程序的权益页, 会自动更新"]);
   ctx.uid = lg.result.user.uid;
@@ -92,7 +92,7 @@ async function run() {
 
   // 用服务器时间对时
   const t0 = Date.now();
-  const info = await post(ctx, "/v1/web/exp-vip/external/super-coupon/info", {});
+  const info = await retry(() => post(ctx, "/v1/web/exp-vip/external/super-coupon/info", {}));
   const offset = (info.result && info.result.serverTime ? info.result.serverTime : Date.now()) - (t0 + Date.now()) / 2;
   const now = () => Date.now() + offset;
 
@@ -123,7 +123,9 @@ async function run() {
   const grant = t => post(ctx, "/v1/web/exp-vip/external/super-coupon/grant",
     { brandId: t.brandId, superCouponId: t.couponId, phoneBizType: "VIP" }).catch(e => ({ code: -1, errmsg: String(e) }));
   const last = {}, tries = {};
-  const isFinal = r => r.code === 200 || /已领取|已领过|领取过|已经领/.test(r.errmsg || ""); // 只有抢到或明确已领才停, 其他提示都继续重试
+  // 抢券模式: 只有抢到才停, 其他任何提示(抢光/未开始/已领过/出错)都继续抢到本轮结束。
+  //   (刚过0点时服务器可能还按前一天算, 回「已领过」, 不能当真)
+  const isFinal = r => r.code === 200;
 
   const when = {};
   if (grabMode && pending.length) {
@@ -156,6 +158,13 @@ async function run() {
 
 function sleep(ms) { return new Promise(ok => setTimeout(ok, ms)); }
 
+// 网络出错时重试(最多3次, 间隔2秒); 服务端正常返回的业务结果不重试
+async function retry(fn, times = 3) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); } catch (e) { if (i >= times) throw e; await sleep(2000); }
+  }
+}
+
 function finish(lines) {
   const msg = lines.join("\n");
   console.log(msg);
@@ -172,14 +181,18 @@ function post(ctx, path, data) {
     "GL-X-XSRF-TOKEN": ctx.xsrf, "GL-CheckSum": sha1(body + ctx.xsrf), "Cookie": ctx.cookie,
   };
   if (ctx.uid) headers["GL-Uid"] = ctx.uid;
-  return new Promise((ok, no) => $httpClient.post({ url: API + path, headers, body }, (err, resp, d) => {
+  return new Promise((ok, no) => {
+   const timer = setTimeout(() => no("请求超时"), 6000); // 单个请求最多等6秒
+   $httpClient.post({ url: API + path, headers, body, timeout: 6000 }, (err, resp, d) => {
+    clearTimeout(timer);
     if (err) return no(err);
     // 登录后服务端下发 GOD_UUID / JSESSIONID, 带上
     const sc = Object.keys(resp.headers || {}).filter(k => k.toLowerCase() === "set-cookie").map(k => resp.headers[k]).join(",");
     const re = /(GOD_UUID|JSESSIONID)=([^;,\s"]+)/g; let m;
     while ((m = re.exec(sc))) ctx.cookie = ctx.cookie.replace(new RegExp(`;? ?${m[1]}=[^;]*`), "") + `; ${m[1]}=${m[2]}`;
     try { ok(JSON.parse(d)); } catch (e) { no("返回不是JSON: " + String(d).slice(0, 100)); }
-  }));
+   });
+  });
 }
 
 function tg(text) {
