@@ -77,6 +77,7 @@ function capture() {
 
 // ---------- 领券 ----------
 async function run() {
+  const startPhone = Date.now();
   const sess = $persistentStore.read(KEY);
   if (!sess) return finish(["还没有 Cookie: 请先开着 Loon 打开一次小程序的权益页"]);
   let dev = $persistentStore.read(DEV_KEY);
@@ -108,6 +109,9 @@ async function run() {
     if (ts + GRAB_SECONDS * 1000 >= now() && ts - now() < 10 * 60000) windows.push({ t, ts });
   }
   windows.sort((a, b) => a.ts - b.ts);
+  // 手机挂起导致脚本迟迟才启动、所有开抢时间都已错过: 0点后半小时内仍立即补抢一轮
+  const bjMs = (now() + BJ) % DAY;
+  if (!windows.length && bjMs < 30 * 60000) windows.push({ t: "补抢", ts: now() });
   const grabMode = windows.length > 0;
 
   // 不查询任何「领没领过」的状态, 一律直接领, 以服务器对领券请求的回复为准
@@ -120,13 +124,16 @@ async function run() {
   //   (刚过0点时服务器可能还按前一天算, 回「已领过」, 不能当真)
   const isFinal = r => r.code === 200;
 
-  const when = {};
+  const when = {}, timeline = [`启动 ${fmt(startPhone + offset)}`];
   if (grabMode && pending.length) {
     for (const w of windows) {
       if (!pending.length) break;
-      const wait = w.ts - now() - 80; // 提前约 80ms 发出, 抵消网络延迟
-      if (wait > 0) await sleep(wait);
-      const end = w.ts + GRAB_SECONDS * 1000;
+      // 分段等待(每次最多1秒): 手机挂起后计时器延迟时能尽快发现并开抢
+      while (w.ts - now() - 80 > 0) await sleep(Math.min(1000, w.ts - now() - 80)); // 提前约80ms发出
+      // 从「实际开始抢」的时刻起算 8 秒: 就算被系统耽误、醒来晚了, 也保证抢满一轮
+      const begin = Math.max(w.ts, now());
+      const end = begin + GRAB_SECONDS * 1000;
+      timeline.push(`${w.t}轮首发 ${fmt(now())}`);
       while (pending.length && now() < end) {
         const rs = await Promise.all(pending.map(grant));
         pending = pending.filter((t, i) => {
@@ -145,11 +152,17 @@ async function run() {
     const r = last[t.couponId];
     if (r) lines.push(`${t.name}: ${r.code === 200 ? "✅ 抢到了" + (when[t.couponId] ? ` (${when[t.couponId]}轮)` : "") : "❌ " + r.errmsg} (${tries[t.couponId]}次)`);
   }
-  if (grabMode) lines.push(`开抢时间 ${windows.map(w => w.t).join(" / ")}, 对时偏差 ${Math.round(offset)}ms`);
+  if (grabMode) lines.push(`开抢时间 ${windows.map(w => w.t).join(" / ")}, 对时偏差 ${Math.round(offset)}ms`, `时间线: ${timeline.join(", ")}`);
   return finish(lines);
 }
 
 function sleep(ms) { return new Promise(ok => setTimeout(ok, ms)); }
+
+// 北京时间 HH:MM:SS.s
+function fmt(ts) {
+  const d = new Date(ts + 8 * 3600000), p = n => String(n).padStart(2, "0");
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${Math.floor(d.getUTCMilliseconds() / 100)}`;
+}
 
 // 网络出错时重试(最多3次, 间隔2秒); 服务端正常返回的业务结果不重试
 async function retry(fn, times = 3) {
