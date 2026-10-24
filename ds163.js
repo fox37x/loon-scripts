@@ -115,9 +115,15 @@ async function run() {
   let pending = TARGETS.slice();
   if (!grabMode) try {
     const st = await post(ctx, "/v1/web/exp-vip/external/super-coupon/grant-status", { superCouponIds: TARGETS.map(t => t.couponId) });
-    const done = {};
-    st.result.grantItems.forEach(g => { if (g.status !== "NOT_GRANTED") done[g.superCouponId] = 1; });
-    pending = TARGETS.filter(t => { if (done[t.couponId]) lines.push(`${t.name}: 已领过`); return !done[t.couponId]; });
+    const stat = {};
+    st.result.grantItems.forEach(g => { stat[g.superCouponId] = g.status; });
+    // 只有服务器明确返回 GRANTED 才算已领过; 其他未知状态显示原文并照常领一次
+    pending = TARGETS.filter(t => {
+      const v = stat[t.couponId];
+      if (v === "GRANTED") { lines.push(`${t.name}: 已领过 (服务器状态 GRANTED)`); return false; }
+      if (v && v !== "NOT_GRANTED") lines.push(`${t.name}: 服务器状态 ${v}`);
+      return true;
+    });
   } catch (e) {}
 
   const grant = t => post(ctx, "/v1/web/exp-vip/external/super-coupon/grant",
