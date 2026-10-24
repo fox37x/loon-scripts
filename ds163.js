@@ -22,7 +22,7 @@ const GRAB_AT = TEST_AT ? [TEST_AT] : ["00:00:00", "00:01:00"]; // 开抢时间(
 const GRAB_SECONDS = TEST_AT ? 3 : 8;  // 每轮开抢后持续重试多少秒
 const INTERVAL_MS = 1000;     // 每次请求间隔(毫秒), 别太小以免风控
 // 说明: 脚本用服务器时间对时, 在 GRAB_AT 前启动会自动等到点再抢;
-//       白天手动运行则每张券只领一次(已领过的跳过)。
+//       不在抢券时段(如白天手动运行)则每张券直接领一次。
 // ==============================
 
 const KEY = "ds163_yd_sess";
@@ -31,13 +31,13 @@ const API = "https://inf.ds.163.com";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.79(0x18004f2e) NetType/WIFI Language/zh_CN miniProgram/wx53eacbe0d8a7a95a";
 
 if (typeof $request !== "undefined") capture();
-else run(false).catch(e => finish(["出错: " + e])).then(() => $done()); // 定时任务: 永不查领取状态
+else run().catch(e => finish(["出错: " + e])).then(() => $done());
 
 // ---------- 抓 Cookie / 保存TG配置 ----------
 function capture() {
   // 手动运行: 开着 Loon 用 Safari 打开 https://inf.ds.163.com/v1/web/ds163-run
   if (($request.url || "").indexOf("/v1/web/ds163-run") >= 0) {
-    return run(true).catch(e => finish(["出错: " + e])).then(lines =>
+    return run().catch(e => finish(["出错: " + e])).then(lines =>
       $done({ response: { status: 200, headers: { "Content-Type": "text/html;charset=utf-8" },
         body: `<meta name="viewport" content="width=device-width"><div style="font:16px -apple-system;padding:16px"><h2>🎟 运行结果</h2><p>${(lines || []).map(esc).join("<br>")}</p></div>` } }));
   }
@@ -76,7 +76,7 @@ function capture() {
 }
 
 // ---------- 领券 ----------
-async function run(manual) {
+async function run() {
   const sess = $persistentStore.read(KEY);
   if (!sess) return finish(["还没有 Cookie: 请先开着 Loon 打开一次小程序的权益页"]);
   let dev = $persistentStore.read(DEV_KEY);
@@ -110,21 +110,8 @@ async function run(manual) {
   windows.sort((a, b) => a.ts - b.ts);
   const grabMode = windows.length > 0;
 
-  // 只有 Safari 手动运行(且不在抢券时段)才先查领取状态。
-  // 定时任务一律不查: 23:59 时还是前一天, 查到的「已领过」是昨天的, 会导致跳过开抢。
+  // 不查询任何「领没领过」的状态, 一律直接领, 以服务器对领券请求的回复为准
   let pending = TARGETS.slice();
-  if (manual && !grabMode) try {
-    const st = await post(ctx, "/v1/web/exp-vip/external/super-coupon/grant-status", { superCouponIds: TARGETS.map(t => t.couponId) });
-    const stat = {};
-    st.result.grantItems.forEach(g => { stat[g.superCouponId] = g.status; });
-    // 只有服务器明确返回 GRANTED 才算已领过; 其他未知状态显示原文并照常领一次
-    pending = TARGETS.filter(t => {
-      const v = stat[t.couponId];
-      if (v === "GRANTED") { lines.push(`${t.name}: 已领过 (服务器状态 GRANTED)`); return false; }
-      if (v && v !== "NOT_GRANTED") lines.push(`${t.name}: 服务器状态 ${v}`);
-      return true;
-    });
-  } catch (e) {}
 
   const grant = t => post(ctx, "/v1/web/exp-vip/external/super-coupon/grant",
     { brandId: t.brandId, superCouponId: t.couponId, phoneBizType: "VIP" }).catch(e => ({ code: -1, errmsg: String(e) }));
