@@ -31,13 +31,13 @@ const API = "https://inf.ds.163.com";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.79(0x18004f2e) NetType/WIFI Language/zh_CN miniProgram/wx53eacbe0d8a7a95a";
 
 if (typeof $request !== "undefined") capture();
-else run().catch(e => finish(["出错: " + e])).then(() => $done());
+else run(false).catch(e => finish(["出错: " + e])).then(() => $done()); // 定时任务: 永不查领取状态
 
 // ---------- 抓 Cookie / 保存TG配置 ----------
 function capture() {
   // 手动运行: 开着 Loon 用 Safari 打开 https://inf.ds.163.com/v1/web/ds163-run
   if (($request.url || "").indexOf("/v1/web/ds163-run") >= 0) {
-    return run().catch(e => finish(["出错: " + e])).then(lines =>
+    return run(true).catch(e => finish(["出错: " + e])).then(lines =>
       $done({ response: { status: 200, headers: { "Content-Type": "text/html;charset=utf-8" },
         body: `<meta name="viewport" content="width=device-width"><div style="font:16px -apple-system;padding:16px"><h2>🎟 运行结果</h2><p>${(lines || []).map(esc).join("<br>")}</p></div>` } }));
   }
@@ -76,7 +76,7 @@ function capture() {
 }
 
 // ---------- 领券 ----------
-async function run() {
+async function run(manual) {
   const sess = $persistentStore.read(KEY);
   if (!sess) return finish(["还没有 Cookie: 请先开着 Loon 打开一次小程序的权益页"]);
   let dev = $persistentStore.read(DEV_KEY);
@@ -110,10 +110,10 @@ async function run() {
   windows.sort((a, b) => a.ts - b.ts);
   const grabMode = windows.length > 0;
 
-  // 白天手动运行时跳过已领过的。
-  // 抢券模式(23:59启动)不能查: 那时还是前一天, 会把前一天的「已领过」当成今天的而跳过开抢
+  // 只有 Safari 手动运行(且不在抢券时段)才先查领取状态。
+  // 定时任务一律不查: 23:59 时还是前一天, 查到的「已领过」是昨天的, 会导致跳过开抢。
   let pending = TARGETS.slice();
-  if (!grabMode) try {
+  if (manual && !grabMode) try {
     const st = await post(ctx, "/v1/web/exp-vip/external/super-coupon/grant-status", { superCouponIds: TARGETS.map(t => t.couponId) });
     const stat = {};
     st.result.grantItems.forEach(g => { stat[g.superCouponId] = g.status; });
