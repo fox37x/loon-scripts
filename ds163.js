@@ -30,8 +30,19 @@ const DEV_KEY = "ds163_device_id";
 const API = "https://inf.ds.163.com";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.79(0x18004f2e) NetType/WIFI Language/zh_CN miniProgram/wx53eacbe0d8a7a95a";
 
+// 主任务 23:59 启动; 备份任务 00:00 / 00:01 启动(argument=backup):
+// 先启动的那个负责抢; 另一个发现对方还活着(心跳5秒内)或今晚已跑完, 就直接退出, 否则接手。
+// 心跳只是手机本地的「我还在运行」信号, 不涉及任何领券状态。
+const IS_BACKUP = typeof $argument === "string" && $argument === "backup";
+const HB_KEY = "ds163_hb", DONE_KEY = "ds163_done_until";
+const beat = () => $persistentStore.write(String(Date.now()), HB_KEY);
+function mainAlive() {
+  const t = Date.now(), hb = Number($persistentStore.read(HB_KEY) || 0), du = Number($persistentStore.read(DONE_KEY) || 0);
+  return t - hb < 5000 || t < du;
+}
 if (typeof $request !== "undefined") capture();
-else run().catch(e => finish(["出错: " + e])).then(() => $done());
+else if (mainAlive()) { console.log("另一个抢券任务正在运行或今晚已完成, 本任务退出"); $done(); }
+else { beat(); run().catch(e => finish(["出错: " + e])).then(() => $done()); }
 
 // ---------- 抓 Cookie / 保存TG配置 ----------
 function capture() {
@@ -86,8 +97,10 @@ async function run() {
   const ctx = { cookie: `NTES_YD_SESS=${sess}; GL-XSRF-TOKEN=${xsrf}; LINK_LOGIN_CHANNEL=MINI_TO_H5; LINK_LOGIN_PRODUCT=godlike_wyds_xcx`, xsrf, dev, uid: "" };
 
   const lg = await retry(() => post(ctx, "/v1/web/base/login", {}));
-  if (lg.code !== 200)
+  if (lg.code !== 200) {
+    $persistentStore.write(String(Date.now() + 5 * 60000), DONE_KEY); // 凭证失效时备份任务不用重复提醒
     return finish([`❌ Cookie 已失效 (${lg.errmsg || lg.code})`, "👉 开着 Loon 打开一次「网易大神」小程序的权益页, 会自动更新"]);
+  }
   ctx.uid = lg.result.user.uid;
   const lines = [`账号: ${lg.result.user.nick}`];
 
@@ -124,16 +137,18 @@ async function run() {
   //   (刚过0点时服务器可能还按前一天算, 回「已领过」, 不能当真)
   const isFinal = r => r.code === 200;
 
-  const when = {}, timeline = [`启动 ${fmt(startPhone + offset)}`];
+  const when = {}, timeline = [`${IS_BACKUP ? "备份任务" : ""}启动 ${fmt(startPhone + offset)}`];
+  let lastEnd = 0;
   if (grabMode && pending.length) {
     for (const w of windows) {
       if (!pending.length) break;
       // 分段等待(每次最多1秒): 手机挂起后计时器延迟时能尽快发现并开抢
-      while (w.ts - now() - 80 > 0) await sleep(Math.min(1000, w.ts - now() - 80)); // 提前约80ms发出
+      while (w.ts - now() - 80 > 0) { beat(); await sleep(Math.min(1000, w.ts - now() - 80)); } // 提前约80ms发出
       // 从「实际开始抢」的时刻起算 8 秒: 就算被系统耽误、醒来晚了, 也保证抢满一轮
       const begin = Math.max(w.ts, now());
       const end = begin + GRAB_SECONDS * 1000;
       timeline.push(`${w.t}轮首发 ${fmt(now())}`);
+      lastEnd = end;
       while (pending.length && now() < end) {
         const rs = await Promise.all(pending.map(grant));
         pending = pending.filter((t, i) => {
@@ -141,6 +156,7 @@ async function run() {
           if (rs[i].code === 200) when[t.couponId] = w.t;
           return !isFinal(rs[i]);
         });
+        beat();
         if (pending.length) await sleep(INTERVAL_MS);
       }
     }
@@ -152,6 +168,10 @@ async function run() {
     const r = last[t.couponId];
     if (r) lines.push(`${t.name}: ${r.code === 200 ? "✅ 抢到了" + (when[t.couponId] ? ` (${when[t.couponId]}轮)` : "") : "❌ " + r.errmsg} (${tries[t.couponId]}次)`);
   }
+  // 今晚的抢券轮次全部结束: 记下时间, 之后启动的备份任务直接退出(手机本地时间)
+  // 覆盖到今晚最后一轮结束(就算第一轮就抢到了), 迟到的另一个任务看到后不会重复抢
+  const nightEnd = Math.max(lastEnd, now(), ...windows.map(w => w.ts + GRAB_SECONDS * 1000));
+  if (grabMode) $persistentStore.write(String(nightEnd - offset + 10000), DONE_KEY);
   if (grabMode) lines.push(`开抢时间 ${windows.map(w => w.t).join(" / ")}, 对时偏差 ${Math.round(offset)}ms`, `时间线: ${timeline.join(", ")}`);
   return finish(lines);
 }
